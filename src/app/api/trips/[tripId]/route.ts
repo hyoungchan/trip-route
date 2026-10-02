@@ -13,6 +13,16 @@ function dbUnavailable() {
   );
 }
 
+function asVersion(value: unknown): number | null {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : Number.NaN;
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : null;
+}
+
 export async function GET(
   _request: NextRequest,
   context: { params: Promise<{ tripId: string }> },
@@ -74,11 +84,8 @@ export async function PATCH(
 
   const payload = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
   const trip = parseTrip(payload.trip);
-  const version =
-    typeof payload.version === "number" && Number.isInteger(payload.version)
-      ? payload.version
-      : null;
-  if (!trip || version == null || version < 1) {
+  const version = asVersion(payload.version);
+  if (!trip || version == null) {
     return NextResponse.json({ error: "일정 데이터가 올바르지 않습니다." }, { status: 400 });
   }
 

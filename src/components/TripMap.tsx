@@ -55,11 +55,16 @@ export function TripMap({ places, onCoordinatesResolved }: TripMapProps) {
 
     loadNaverMaps()
       .then(() => {
-        if (cancelled || !containerRef.current) {
+        if (cancelled) {
+          return;
+        }
+        const container = containerRef.current;
+        if (!container || !window.naver?.maps) {
+          setStatus("error");
           return;
         }
 
-        mapRef.current = new window.naver.maps.Map(containerRef.current, {
+        mapRef.current = new window.naver.maps.Map(container, {
           center: new window.naver.maps.LatLng(37.5665, 126.978),
           zoom: 12,
           scaleControl: false,

@@ -14,6 +14,7 @@ import {
   getTripById,
   hasCoordinates,
   listTripDates,
+  normalizeIsoDate,
   saveLocalTrip,
 } from "@/lib/trips";
 import { DEFAULT_STAY_MINUTES } from "@/lib/timetable";
@@ -117,7 +118,7 @@ export function AddPlacePage({ tripId, date, placeId, mode = "local" }: AddPlace
       }
       const place = (nextTrip.places ?? []).find((item) => item.id === placeId) ?? null;
       setEditingPlace(place);
-      if (!place || place.date !== date) {
+      if (!place || normalizeIsoDate(place.date) !== normalizeIsoDate(date)) {
         return;
       }
       setSelected(placeToSelected(place));
@@ -140,10 +141,16 @@ export function AddPlacePage({ tripId, date, placeId, mode = "local" }: AddPlace
   }
 
   const dates = trip ? listTripDates(trip.startDate, trip.endDate) : [];
-  const dayIndex = dates.indexOf(date);
+  const dayDate = normalizeIsoDate(decodeURIComponent(date));
+  const dayIndex = dates.indexOf(dayDate);
   const tripHref = isShared ? `/trip/${tripId}` : `/trips/${tripId}`;
 
-  if (!trip || dayIndex < 0 || (isEdit && (!editingPlace || editingPlace.date !== date))) {
+  if (
+    !trip ||
+    dayIndex < 0 ||
+    (isEdit &&
+      (!editingPlace || normalizeIsoDate(editingPlace.date) !== dayDate))
+  ) {
     return (
       <div className="min-h-dvh bg-[#F6F1E8] px-4 py-16 text-center">
         <p className="text-lg font-semibold text-slate-800">일정을 찾을 수 없어요</p>
@@ -298,7 +305,7 @@ export function AddPlacePage({ tripId, date, placeId, mode = "local" }: AddPlace
 
       nextTrip = applyAddPlaceToTrip(trip, {
         ...payload,
-        date,
+        date: dayDate,
       });
       addedId = nextTrip.places?.at(-1)?.id;
       const persisted = await persistPlaceTrip(nextTrip);
@@ -334,7 +341,7 @@ export function AddPlacePage({ tripId, date, placeId, mode = "local" }: AddPlace
       <main className="mx-auto w-full max-w-md px-4 pb-[calc(6.5rem+env(safe-area-inset-bottom))] pt-6 sm:pb-10 sm:pt-8">
         <p className="break-keep text-sm font-medium text-teal-700">{trip.title}</p>
         <h1 id={titleId} className="mt-1 break-keep text-2xl font-semibold tracking-tight">
-          {formatDayLabel(date, dayIndex)}
+          {formatDayLabel(dayDate, dayIndex)}
         </h1>
         <p className="mt-2 text-sm leading-6 text-slate-500">
           {isEdit

@@ -20,6 +20,7 @@ import {
   saveLocalTrip,
 } from "@/lib/trips";
 import { ShareTripControls } from "./ShareTripControls";
+import { loadNaverMaps } from "@/lib/naver-maps";
 import { emojiForPlace, isNoStayPlace } from "@/lib/place-category";
 import { backfillMissingPlaceCategories } from "@/lib/place-category-backfill";
 import {
@@ -73,6 +74,12 @@ export function TripDetailPage({ tripId, mode = "local" }: TripDetailPageProps) 
     () => loadCollapsedDates(tripId),
   );
   const [focusPlaceId, setFocusPlaceId] = useState<string | null>(null);
+
+  useEffect(() => {
+    void loadNaverMaps().catch(() => {
+      // TripMap shows its own overlay if the SDK does not load.
+    });
+  }, []);
 
   useEffect(() => {
     const placeId =

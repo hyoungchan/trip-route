@@ -9,7 +9,31 @@ import {
 
 const TRIPS_STORAGE_KEY = "trip-route.trips";
 
+function toFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+export function normalizeIsoDate(value: string): string {
+  const trimmed = value.trim();
+  const ymd = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (ymd) {
+    return ymd[1];
+  }
+  return trimmed;
+}
+
 export function normalizePlace(place: Place): Place {
+  const latitude = toFiniteNumber(place.latitude);
+  const longitude = toFiniteNumber(place.longitude);
   const travelMode =
     place.travelMode === "drive" ||
     place.travelMode === "walk" ||
@@ -39,8 +63,11 @@ export function normalizePlace(place: Place): Place {
 
   return {
     ...place,
+    date: normalizeIsoDate(place.date),
     ...(kind ? { kind } : { kind: undefined }),
     ...(category ? { category } : { category: undefined }),
+    ...(latitude != null ? { latitude } : { latitude: undefined }),
+    ...(longitude != null ? { longitude } : { longitude: undefined }),
     stayMinutes: getStayMinutes({ ...place, kind, category }),
     travelMinutesToNext: getTravelMinutes(place),
     ...(travelMode ? { travelMode } : { travelMode: undefined }),
@@ -59,6 +86,8 @@ export function normalizeTrip(trip: Trip): Trip {
   const dayStartTimes = normalizeDayStartTimes(trip.dayStartTimes);
   return {
     ...trip,
+    startDate: normalizeIsoDate(trip.startDate),
+    endDate: normalizeIsoDate(trip.endDate),
     places,
     stopCount: places.length,
     ...(Object.keys(dayStartTimes).length > 0 ? { dayStartTimes } : {}),

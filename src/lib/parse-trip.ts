@@ -2,11 +2,19 @@ import { normalizeTrip } from "@/lib/trips";
 import type { Place, Trip } from "@/types/trip";
 
 export function parseTrip(value: unknown): Trip | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  let input = value;
+  if (typeof input === "string") {
+    try {
+      input = JSON.parse(input) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
     return null;
   }
 
-  const raw = value as Record<string, unknown>;
+  const raw = input as Record<string, unknown>;
   if (
     typeof raw.id !== "string" ||
     !raw.id.trim() ||

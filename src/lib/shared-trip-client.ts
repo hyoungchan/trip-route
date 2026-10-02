@@ -27,6 +27,16 @@ async function readJson(response: Response) {
   }
 }
 
+function asVersion(value: unknown): number | null {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : Number.NaN;
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : null;
+}
+
 function messageFrom(data: Record<string, unknown>, fallback: string) {
   return typeof data.error === "string" && data.error.trim()
     ? data.error
@@ -45,13 +55,14 @@ export async function createSharedTrip(trip: Trip): Promise<SharedTripPayload & 
   }
   const created = data.trip as Trip | undefined;
   const id = typeof data.id === "string" ? data.id : created?.id;
-  if (!created || !id || typeof data.version !== "number") {
+  const version = asVersion(data.version);
+  if (!created || !id || version == null) {
     throw new Error("공유 링크를 만들지 못했습니다.");
   }
   return {
     id,
     trip: created,
-    version: data.version,
+    version,
     createdAt: typeof data.createdAt === "string" ? data.createdAt : undefined,
     updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : undefined,
   };
@@ -69,12 +80,13 @@ export async function loadSharedTrip(shareId: string): Promise<SharedTripPayload
     throw new Error(messageFrom(data, "공유 일정을 불러오지 못했습니다."));
   }
   const trip = data.trip as Trip | undefined;
-  if (!trip || typeof data.version !== "number") {
+  const version = asVersion(data.version);
+  if (!trip || version == null) {
     throw new Error("공유 일정을 불러오지 못했습니다.");
   }
   return {
     trip,
-    version: data.version,
+    version,
     createdAt: typeof data.createdAt === "string" ? data.createdAt : undefined,
     updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : undefined,
   };
@@ -93,8 +105,8 @@ export async function saveSharedTrip(
   const data = await readJson(response);
   if (response.status === 409) {
     const latest = data.trip as Trip | undefined;
-    const latestVersion = data.version;
-    if (latest && typeof latestVersion === "number") {
+    const latestVersion = asVersion(data.version);
+    if (latest && latestVersion != null) {
       throw new SharedTripConflictError(latest, latestVersion);
     }
     throw new Error("일정이 다른 사용자에 의해 변경되었습니다. 최신 내용을 불러와 주세요.");
@@ -103,12 +115,13 @@ export async function saveSharedTrip(
     throw new Error(messageFrom(data, "일정을 저장하지 못했습니다."));
   }
   const saved = data.trip as Trip | undefined;
-  if (!saved || typeof data.version !== "number") {
+  const savedVersion = asVersion(data.version);
+  if (!saved || savedVersion == null) {
     throw new Error("일정을 저장하지 못했습니다.");
   }
   return {
     trip: saved,
-    version: data.version,
+    version: savedVersion,
     updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : undefined,
   };
 }

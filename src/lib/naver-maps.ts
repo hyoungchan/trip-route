@@ -26,7 +26,7 @@ export function loadNaverMaps(): Promise<void> {
 
   loading = new Promise((resolve, reject) => {
     const existing = document.getElementById(SCRIPT_ID) as HTMLScriptElement | null;
-    if (existing && window.naver?.maps) {
+    if (window.naver?.maps) {
       resolve();
       return;
     }
@@ -43,7 +43,7 @@ export function loadNaverMaps(): Promise<void> {
       delete (window as unknown as Record<string, unknown>)[callbackName];
     }
 
-    (window as unknown as Record<string, unknown>)[callbackName] = () => {
+    function succeed() {
       cleanup();
       if (window.naver?.maps) {
         resolve();
@@ -51,9 +51,43 @@ export function loadNaverMaps(): Promise<void> {
       }
       loading = null;
       reject(new Error("SDK_MISSING"));
-    };
+    }
 
-    const script = existing ?? document.createElement("script");
+    (window as unknown as Record<string, unknown>)[callbackName] = succeed;
+
+    if (existing) {
+      if (window.naver?.maps) {
+        succeed();
+        return;
+      }
+      const readyState = (existing as HTMLScriptElement & { readyState?: string })
+        .readyState;
+      if (readyState === "complete") {
+        existing.remove();
+      } else {
+        existing.addEventListener(
+          "load",
+          () => {
+            if (window.naver?.maps) {
+              succeed();
+            }
+          },
+          { once: true },
+        );
+        existing.addEventListener(
+          "error",
+          () => {
+            cleanup();
+            loading = null;
+            reject(new Error("LOAD_FAILED"));
+          },
+          { once: true },
+        );
+        return;
+      }
+    }
+
+    const script = document.createElement("script");
     script.id = SCRIPT_ID;
     script.async = true;
     script.src = `https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${encodeURIComponent(
@@ -64,10 +98,7 @@ export function loadNaverMaps(): Promise<void> {
       loading = null;
       reject(new Error("LOAD_FAILED"));
     };
-
-    if (!existing) {
-      document.head.appendChild(script);
-    }
+    document.head.appendChild(script);
   });
 
   return loading;
