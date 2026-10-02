@@ -1,23 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
-  deletePlaceFromTrip,
+  applyDeletePlaceFromTrip,
+  applyReorderDayPlaces,
+  applyUpdateDayStartTime,
+  applyUpdatePlaceCoordinates,
+  applyUpdatePlaceDrivingTravel,
+  applyUpdatePlaceStayMinutes,
+  applyUpdatePlaceTransitTravel,
+  applyUpdatePlaceTravelMinutes,
+  applyUpdatePlaceWalkTravel,
   formatDayLabel,
   formatTripPeriod,
   getTripById,
   getTripDuration,
   listTripDates,
-  reorderDayPlaces,
-  updateDayStartTime,
-  updatePlaceCoordinates,
-  updatePlaceDrivingTravel,
-  updatePlaceStayMinutes,
-  updatePlaceTransitTravel,
-  updatePlaceTravelMinutes,
-  updatePlaceWalkTravel,
+  saveLocalTrip,
 } from "@/lib/trips";
+import { ShareTripControls } from "./ShareTripControls";
 import { emojiForPlace, isNoStayPlace } from "@/lib/place-category";
 import { backfillMissingPlaceCategories } from "@/lib/place-category-backfill";
 import {
@@ -35,6 +37,11 @@ import {
   isTransitTravelMode,
 } from "@/lib/travel-transit";
 import type { Place, Trip } from "@/types/trip";
+import {
+  loadSharedTrip,
+  saveSharedTrip,
+  SharedTripConflictError,
+} from "@/lib/shared-trip-client";
 import { StayDurationField } from "./StayDurationField";
 import {
   TravelDurationField,
@@ -46,12 +53,22 @@ import { TripMap } from "./TripMap";
 
 type TripDetailPageProps = {
   tripId: string;
+  mode?: "local" | "shared";
 };
 
 const COLLAPSED_DATES_STORAGE_KEY = "trip-route.ui.collapsedDates";
+const CONFLICT_MESSAGE =
+  "일정이 다른 사용자에 의해 변경되었습니다. 최신 내용을 불러와 주세요.";
 
-export function TripDetailPage({ tripId }: TripDetailPageProps) {
+export function TripDetailPage({ tripId, mode = "local" }: TripDetailPageProps) {
+  const isShared = mode === "shared";
   const [trip, setTrip] = useState<Trip | null | undefined>(undefined);
+  const [version, setVersion] = useState(1);
+  const [loadError, setLoadError] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const versionRef = useRef(1);
+  const tripRef = useRef<Trip | null | undefined>(undefined);
   const [collapsedDates, setCollapsedDates] = useState<Record<string, boolean>>(
     () => loadCollapsedDates(tripId),
   );
@@ -62,18 +79,63 @@ export function TripDetailPage({ tripId }: TripDetailPageProps) {
       typeof window === "undefined"
         ? null
         : new URLSearchParams(window.location.search).get("place");
-    setTrip(getTripById(tripId));
-    setCollapsedDates(loadCollapsedDates(tripId));
     setFocusPlaceId(placeId);
-  }, [tripId]);
+    setCollapsedDates(loadCollapsedDates(tripId));
+    setSaveError("");
+    setLoadError("");
+
+    if (!isShared) {
+      const loaded = getTripById(tripId);
+      tripRef.current = loaded;
+      setTrip(loaded);
+      return;
+    }
+
+    let cancelled = false;
+    setTrip(undefined);
+    loadSharedTrip(tripId)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        if (!result) {
+          tripRef.current = null;
+          setTrip(null);
+          return;
+        }
+        tripRef.current = result.trip;
+        setTrip(result.trip);
+        setVersion(result.version);
+        versionRef.current = result.version;
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        tripRef.current = null;
+        setTrip(null);
+        setLoadError(
+          error instanceof Error && error.message
+            ? error.message
+            : "공유 일정을 불러오지 못했습니다.",
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tripId, isShared]);
 
   useEffect(() => {
+    if (isShared) {
+      return;
+    }
     let cancelled = false;
     backfillMissingPlaceCategories(tripId)
       .then((result) => {
         if (cancelled || !result) {
           return;
         }
+        tripRef.current = result.trip;
         setTrip(result.trip);
       })
       .catch(() => {
@@ -82,7 +144,7 @@ export function TripDetailPage({ tripId }: TripDetailPageProps) {
     return () => {
       cancelled = true;
     };
-  }, [tripId]);
+  }, [tripId, isShared]);
 
   useEffect(() => {
     if (!trip || !focusPlaceId) {
@@ -138,6 +200,81 @@ export function TripDetailPage({ tripId }: TripDetailPageProps) {
     };
   }, [trip, focusPlaceId, collapsedDates, tripId]);
 
+  async function persistShared(next: Trip) {
+    setSaveError("");
+    try {
+      const saved = await saveSharedTrip(tripId, next, versionRef.current);
+      tripRef.current = saved.trip;
+      setTrip(saved.trip);
+      setVersion(saved.version);
+      versionRef.current = saved.version;
+    } catch (error) {
+      if (error instanceof SharedTripConflictError) {
+        tripRef.current = error.trip;
+        setTrip(error.trip);
+        setVersion(error.version);
+        versionRef.current = error.version;
+        setSaveError(CONFLICT_MESSAGE);
+        return;
+      }
+      setSaveError(
+        error instanceof Error && error.message
+          ? error.message
+          : "일정을 저장하지 못했습니다.",
+      );
+    }
+  }
+
+  function commit(mutate: (current: Trip) => Trip | null) {
+    const current = tripRef.current;
+    if (!current) {
+      return;
+    }
+    const next = mutate(current);
+    if (!next) {
+      return;
+    }
+    tripRef.current = next;
+    setTrip(next);
+    if (isShared) {
+      void persistShared(next);
+      return;
+    }
+    const saved = saveLocalTrip(next);
+    if (saved) {
+      tripRef.current = saved;
+      setTrip(saved);
+    }
+  }
+
+  async function handleRefresh() {
+    if (!isShared) {
+      return;
+    }
+    setRefreshing(true);
+    setSaveError("");
+    try {
+      const result = await loadSharedTrip(tripId);
+      if (!result) {
+        tripRef.current = null;
+        setTrip(null);
+        return;
+      }
+      tripRef.current = result.trip;
+      setTrip(result.trip);
+      setVersion(result.version);
+      versionRef.current = result.version;
+    } catch (error) {
+      setSaveError(
+        error instanceof Error && error.message
+          ? error.message
+          : "최신 일정을 불러오지 못했습니다.",
+      );
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   if (trip === undefined) {
     return (
       <div className="min-h-dvh bg-[#F6F1E8] px-4 py-16 text-center text-slate-500">
@@ -150,6 +287,7 @@ export function TripDetailPage({ tripId }: TripDetailPageProps) {
     return (
       <div className="min-h-dvh bg-[#F6F1E8] px-4 py-16 text-center">
         <p className="text-lg font-semibold text-slate-800">여행을 찾을 수 없어요</p>
+        {loadError ? <p className="mt-2 text-sm text-slate-500">{loadError}</p> : null}
         <Link href="/" className="mt-4 inline-block text-sm font-medium text-teal-700">
           목록으로 돌아가기
         </Link>
@@ -189,6 +327,15 @@ export function TripDetailPage({ tripId }: TripDetailPageProps) {
             {getTripDuration(trip.startDate, trip.endDate)}
           </p>
           <p className="mt-2 text-sm text-slate-400">장소 {places.length}곳</p>
+          {saveError ? (
+            <p className="mt-3 text-sm font-medium text-red-600">{saveError}</p>
+          ) : null}
+          <ShareTripControls
+            trip={trip}
+            mode={mode}
+            onRefresh={isShared ? () => void handleRefresh() : undefined}
+            refreshing={refreshing}
+          />
         </section>
 
         <div className="mt-6 grid grid-cols-1 gap-5 lg:mt-8 lg:grid-cols-[minmax(20rem,1.1fr)_minmax(22rem,0.9fr)]">
@@ -199,10 +346,7 @@ export function TripDetailPage({ tripId }: TripDetailPageProps) {
               places.filter((place) => place.date === date),
             )}
             onCoordinatesResolved={(updates) => {
-              const next = updatePlaceCoordinates(trip.id, updates);
-              if (next) {
-                setTrip(next);
-              }
+              commit((current) => applyUpdatePlaceCoordinates(current, updates));
             }}
           />
             </div>
@@ -250,12 +394,20 @@ export function TripDetailPage({ tripId }: TripDetailPageProps) {
               dates.map((date, index) => (
                 <DaySchedule
                   key={date}
-                  tripId={trip.id}
                   date={date}
                   label={formatDayLabel(date, index)}
                   startTime={trip.dayStartTimes?.[date]}
                   places={places.filter((place) => place.date === date)}
-                  addHref={`/trips/${trip.id}/days/${date}/places/new`}
+                  addHref={
+                    isShared
+                      ? `/trip/${trip.id}/days/${date}/places/new`
+                      : `/trips/${trip.id}/days/${date}/places/new`
+                  }
+                  editHrefBase={
+                    isShared
+                      ? `/trip/${trip.id}/days/${date}/places`
+                      : `/trips/${trip.id}/days/${date}/places`
+                  }
                   expanded={collapsedDates[date] !== true}
                   onToggle={() => {
                     setCollapsedDates((current) => {
@@ -268,63 +420,51 @@ export function TripDetailPage({ tripId }: TripDetailPageProps) {
                     });
                   }}
                   onStartTimeChange={(time) => {
-                    const next = updateDayStartTime(trip.id, date, time);
-                    if (next) {
-                      setTrip(next);
-                    }
+                    commit((current) => applyUpdateDayStartTime(current, date, time));
                   }}
                   onStayChange={(placeId, stayMinutes) => {
-                    const next = updatePlaceStayMinutes(trip.id, placeId, stayMinutes);
-                    if (next) {
-                      setTrip(next);
-                    }
+                    commit((current) =>
+                      applyUpdatePlaceStayMinutes(current, placeId, stayMinutes),
+                    );
                   }}
                   onTravelChange={(placeId, travelMinutes) => {
-                    const next = updatePlaceTravelMinutes(trip.id, placeId, travelMinutes);
-                    if (next) {
-                      setTrip(next);
-                    }
+                    commit((current) =>
+                      applyUpdatePlaceTravelMinutes(current, placeId, travelMinutes),
+                    );
                   }}
                   onWalkTravelChange={(placeId, travelMinutes) => {
-                    const next = updatePlaceWalkTravel(trip.id, placeId, travelMinutes);
-                    if (next) {
-                      setTrip(next);
-                    }
+                    commit((current) =>
+                      applyUpdatePlaceWalkTravel(current, placeId, travelMinutes),
+                    );
                   }}
                   onDriveTravelChange={(placeId, durationMinutes, distanceKm) => {
-                    const next = updatePlaceDrivingTravel(
-                      trip.id,
-                      placeId,
-                      durationMinutes,
-                      distanceKm,
+                    commit((current) =>
+                      applyUpdatePlaceDrivingTravel(
+                        current,
+                        placeId,
+                        durationMinutes,
+                        distanceKm,
+                      ),
                     );
-                    if (next) {
-                      setTrip(next);
-                    }
                   }}
                   onTransitTravelChange={(placeId, result) => {
-                    const next = updatePlaceTransitTravel(trip.id, placeId, {
-                      travelMode: result.travelMode,
-                      travelMinutesToNext: result.durationMinutes,
-                      distanceKm: result.distanceKm,
-                      transit: result.transit,
-                      steps: result.steps,
-                    });
-                    if (next) {
-                      setTrip(next);
-                    }
+                    commit((current) =>
+                      applyUpdatePlaceTransitTravel(current, placeId, {
+                        travelMode: result.travelMode,
+                        travelMinutesToNext: result.durationMinutes,
+                        distanceKm: result.distanceKm,
+                        transit: result.transit,
+                        steps: result.steps,
+                      }),
+                    );
                   }}
                   onDelete={(placeId) => {
-                    const next = deletePlaceFromTrip(trip.id, placeId);
-                    if (next) {
-                      setTrip(next);
-                    }
+                    commit((current) => applyDeletePlaceFromTrip(current, placeId));
                   }}
                   onReorder={(orderedIds) => {
-                    const next = reorderDayPlaces(trip.id, date, orderedIds);
-                    if (next) {
-                      setTrip(next);
-                    }
+                    commit((current) =>
+                      applyReorderDayPlaces(current, date, orderedIds),
+                    );
                   }}
                 />
               ))
@@ -337,12 +477,12 @@ export function TripDetailPage({ tripId }: TripDetailPageProps) {
 }
 
 function DaySchedule({
-  tripId,
   date,
   label,
   startTime,
   places,
   addHref,
+  editHrefBase,
   expanded,
   onToggle,
   onStartTimeChange,
@@ -354,12 +494,12 @@ function DaySchedule({
   onDelete,
   onReorder,
 }: {
-  tripId: string;
   date: string;
   label: string;
   startTime?: string;
   places: Place[];
   addHref: string;
+  editHrefBase: string;
   expanded: boolean;
   onToggle: () => void;
   onStartTimeChange: (startTime: string) => void;
@@ -573,7 +713,7 @@ function DaySchedule({
                   </div>
                   <div className="flex shrink-0 items-start">
                     <Link
-                      href={`/trips/${tripId}/days/${date}/places/${place.id}/edit`}
+                      href={`${editHrefBase}/${place.id}/edit`}
                       className="inline-flex min-h-11 shrink-0 items-center px-2 text-sm font-medium text-slate-400 hover:text-teal-800"
                     >
                       ✏️ 수정

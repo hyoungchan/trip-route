@@ -8,12 +8,13 @@ import {
   type PlaceSearchResult,
 } from "@/lib/naver-maps";
 import {
-  addPlaceToTrip,
+  applyAddPlaceToTrip,
+  applyUpdatePlaceInTrip,
   formatDayLabel,
   getTripById,
   hasCoordinates,
   listTripDates,
-  updatePlaceInTrip,
+  saveLocalTrip,
 } from "@/lib/trips";
 import { DEFAULT_STAY_MINUTES } from "@/lib/timetable";
 import { isNoStayPlace, placeKindOf } from "@/lib/place-category";
@@ -21,6 +22,11 @@ import {
   placeCoordinatesChanged,
   refreshAdjacentTravelTimes,
 } from "@/lib/travel-refresh";
+import {
+  loadSharedTrip,
+  saveSharedTrip,
+  SharedTripConflictError,
+} from "@/lib/shared-trip-client";
 import type { Place, PlaceKind, Trip } from "@/types/trip";
 import { StayDurationField } from "./StayDurationField";
 
@@ -43,12 +49,14 @@ type AddPlacePageProps = {
   tripId: string;
   date: string;
   placeId?: string;
+  mode?: "local" | "shared";
 };
 
-export function AddPlacePage({ tripId, date, placeId }: AddPlacePageProps) {
+export function AddPlacePage({ tripId, date, placeId, mode = "local" }: AddPlacePageProps) {
   const router = useRouter();
   const titleId = useId();
   const isEdit = Boolean(placeId);
+  const isShared = mode === "shared";
   const [trip, setTrip] = useState<Trip | null | undefined>(undefined);
   const [editingPlace, setEditingPlace] = useState<Place | null>(null);
   const [query, setQuery] = useState("");
@@ -60,28 +68,68 @@ export function AddPlacePage({ tripId, date, placeId }: AddPlacePageProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [stayMinutes, setStayMinutes] = useState(DEFAULT_STAY_MINUTES);
+  const [version, setVersion] = useState(1);
 
   useEffect(() => {
-    const nextTrip = getTripById(tripId);
-    setTrip(nextTrip);
-    if (!placeId || !nextTrip) {
-      setEditingPlace(null);
+    if (!isShared) {
+      const nextTrip = getTripById(tripId);
+      setTrip(nextTrip);
+      applyEditingPlace(nextTrip);
       return;
     }
-    const place = (nextTrip.places ?? []).find((item) => item.id === placeId) ?? null;
-    setEditingPlace(place);
-    if (!place || place.date !== date) {
-      return;
+
+    let cancelled = false;
+    setTrip(undefined);
+    loadSharedTrip(tripId)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        if (!result) {
+          setTrip(null);
+          setEditingPlace(null);
+          return;
+        }
+        setTrip(result.trip);
+        setVersion(result.version);
+        applyEditingPlace(result.trip);
+      })
+      .catch((loadError) => {
+        if (cancelled) {
+          return;
+        }
+        setTrip(null);
+        setEditingPlace(null);
+        setError(
+          loadError instanceof Error && loadError.message
+            ? loadError.message
+            : "공유 일정을 불러오지 못했습니다.",
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+
+    function applyEditingPlace(nextTrip: Trip | null) {
+      if (!placeId || !nextTrip) {
+        setEditingPlace(null);
+        return;
+      }
+      const place = (nextTrip.places ?? []).find((item) => item.id === placeId) ?? null;
+      setEditingPlace(place);
+      if (!place || place.date !== date) {
+        return;
+      }
+      setSelected(placeToSelected(place));
+      setSelectedKind(placeKindOf(place));
+      setQuery(place.name);
+      setStayMinutes(
+        typeof place.stayMinutes === "number" && place.stayMinutes > 0
+          ? place.stayMinutes
+          : DEFAULT_STAY_MINUTES,
+      );
     }
-    setSelected(placeToSelected(place));
-    setSelectedKind(placeKindOf(place));
-    setQuery(place.name);
-    setStayMinutes(
-      typeof place.stayMinutes === "number" && place.stayMinutes > 0
-        ? place.stayMinutes
-        : DEFAULT_STAY_MINUTES,
-    );
-  }, [tripId, date, placeId]);
+  }, [tripId, date, placeId, isShared]);
 
   if (trip === undefined) {
     return (
@@ -93,7 +141,7 @@ export function AddPlacePage({ tripId, date, placeId }: AddPlacePageProps) {
 
   const dates = trip ? listTripDates(trip.startDate, trip.endDate) : [];
   const dayIndex = dates.indexOf(date);
-  const tripHref = `/trips/${tripId}`;
+  const tripHref = isShared ? `/trip/${tripId}` : `/trips/${tripId}`;
 
   if (!trip || dayIndex < 0 || (isEdit && (!editingPlace || editingPlace.date !== date))) {
     return (
@@ -111,6 +159,36 @@ export function AddPlacePage({ tripId, date, placeId }: AddPlacePageProps) {
     kind: resolvedKind,
     category: selected?.category,
   });
+
+  async function persistPlaceTrip(next: Trip): Promise<Trip | null> {
+    if (!isShared) {
+      const saved = saveLocalTrip(next);
+      if (!saved) {
+        setError("장소를 저장하지 못했습니다.");
+        return null;
+      }
+      return saved;
+    }
+    try {
+      const saved = await saveSharedTrip(tripId, next, version);
+      setVersion(saved.version);
+      setTrip(saved.trip);
+      return saved.trip;
+    } catch (persistError) {
+      if (persistError instanceof SharedTripConflictError) {
+        setTrip(persistError.trip);
+        setVersion(persistError.version);
+        setError("일정이 다른 사용자에 의해 변경되었습니다. 최신 내용을 불러와 주세요.");
+        return null;
+      }
+      setError(
+        persistError instanceof Error && persistError.message
+          ? persistError.message
+          : "장소를 저장하지 못했습니다.",
+      );
+      return null;
+    }
+  }
 
   async function handleSearch(event?: FormEvent) {
     event?.preventDefault();
@@ -170,22 +248,47 @@ export function AddPlacePage({ tripId, date, placeId }: AddPlacePageProps) {
     };
 
     try {
+      if (!trip) {
+        setError("일정을 찾을 수 없어요.");
+        return;
+      }
+
+      let nextTrip: Trip | null = null;
+      let addedId: string | undefined;
+
       if (isEdit && placeId && editingPlace) {
         const previous = {
           latitude: editingPlace.latitude,
           longitude: editingPlace.longitude,
         };
-        const saved = updatePlaceInTrip(tripId, placeId, payload);
-        if (!saved) {
+        nextTrip = applyUpdatePlaceInTrip(trip, placeId, payload);
+        if (!nextTrip) {
           setError("장소를 저장하지 못했습니다.");
           return;
         }
-        const updated = saved.places?.find((place) => place.id === placeId);
-        if (
-          updated &&
-          placeCoordinatesChanged(previous, updated)
-        ) {
-          await refreshAdjacentTravelTimes(tripId, placeId);
+        addedId = placeId;
+        const updated = nextTrip.places?.find((place) => place.id === placeId);
+        const coordsChanged = Boolean(
+          updated && placeCoordinatesChanged(previous, updated),
+        );
+        const persisted = await persistPlaceTrip(nextTrip);
+        if (!persisted) {
+          return;
+        }
+        if (coordsChanged) {
+          if (isShared) {
+            let latest = persisted;
+            await refreshAdjacentTravelTimes(tripId, placeId, {
+              getTrip: () => latest,
+              saveTrip: (current) => {
+                latest = current;
+                return current;
+              },
+            });
+            await persistPlaceTrip(latest);
+          } else {
+            await refreshAdjacentTravelTimes(tripId, placeId);
+          }
         }
         router.push(`${tripHref}?place=${encodeURIComponent(placeId)}`, {
           scroll: false,
@@ -193,16 +296,15 @@ export function AddPlacePage({ tripId, date, placeId }: AddPlacePageProps) {
         return;
       }
 
-      const saved = addPlaceToTrip(tripId, {
+      nextTrip = applyAddPlaceToTrip(trip, {
         ...payload,
         date,
       });
-      if (!saved) {
-        setError("장소를 저장하지 못했습니다.");
+      addedId = nextTrip.places?.at(-1)?.id;
+      const persisted = await persistPlaceTrip(nextTrip);
+      if (!persisted) {
         return;
       }
-
-      const addedId = saved.places?.at(-1)?.id;
       const href = addedId
         ? `${tripHref}?place=${encodeURIComponent(addedId)}`
         : tripHref;

@@ -1,4 +1,10 @@
-import { hasCoordinates, getTripById, updatePlaceDrivingTravel, updatePlaceTransitTravel } from "@/lib/trips";
+import {
+  applyUpdatePlaceDrivingTravel,
+  applyUpdatePlaceTransitTravel,
+  hasCoordinates,
+  localTripStore,
+  type TripStore,
+} from "@/lib/trips";
 import {
   parseTravelTransit,
   parseTravelTransitSteps,
@@ -32,8 +38,9 @@ export function placeCoordinatesChanged(
 export async function refreshAdjacentTravelTimes(
   tripId: string,
   placeId: string,
+  store: TripStore = localTripStore,
 ): Promise<Trip | null> {
-  const trip = getTripById(tripId);
+  const trip = store.getTrip(tripId);
   if (!trip) {
     return null;
   }
@@ -54,22 +61,23 @@ export async function refreshAdjacentTravelTimes(
   const next = dayPlaces[index + 1];
 
   if (previous) {
-    await applyStoredTravelMode(tripId, previous, target);
+    await applyStoredTravelMode(tripId, previous, target, store);
   }
   if (next) {
-    const latest = getTripById(tripId);
+    const latest = store.getTrip(tripId);
     const origin =
       latest?.places?.find((place) => place.id === placeId) ?? target;
-    await applyStoredTravelMode(tripId, origin, next);
+    await applyStoredTravelMode(tripId, origin, next, store);
   }
 
-  return getTripById(tripId);
+  return store.getTrip(tripId);
 }
 
 async function applyStoredTravelMode(
   tripId: string,
   origin: Place,
   destination: Place,
+  store: TripStore,
 ): Promise<void> {
   if (!hasCoordinates(origin) || !hasCoordinates(destination)) {
     return;
@@ -80,11 +88,17 @@ async function applyStoredTravelMode(
     if (!result) {
       return;
     }
-    updatePlaceDrivingTravel(
-      tripId,
-      origin.id,
-      result.durationMinutes,
-      result.distanceKm,
+    const current = store.getTrip(tripId);
+    if (!current) {
+      return;
+    }
+    store.saveTrip(
+      applyUpdatePlaceDrivingTravel(
+        current,
+        origin.id,
+        result.durationMinutes,
+        result.distanceKm,
+      ),
     );
     return;
   }
@@ -94,13 +108,19 @@ async function applyStoredTravelMode(
     if (!result) {
       return;
     }
-    updatePlaceTransitTravel(tripId, origin.id, {
-      travelMode: origin.travelMode,
-      travelMinutesToNext: result.durationMinutes,
-      distanceKm: result.distanceKm,
-      transit: result.transit,
-      steps: result.steps,
-    });
+    const current = store.getTrip(tripId);
+    if (!current) {
+      return;
+    }
+    store.saveTrip(
+      applyUpdatePlaceTransitTravel(current, origin.id, {
+        travelMode: origin.travelMode,
+        travelMinutesToNext: result.durationMinutes,
+        distanceKm: result.distanceKm,
+        transit: result.transit,
+        steps: result.steps,
+      }),
+    );
   }
 }
 

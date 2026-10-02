@@ -195,6 +195,20 @@ function persistTrip(nextTrip: Trip): Trip | null {
   return nextTrip;
 }
 
+export function saveLocalTrip(nextTrip: Trip): Trip | null {
+  return persistTrip(nextTrip);
+}
+
+export type TripStore = {
+  getTrip: (tripId: string) => Trip | null;
+  saveTrip: (trip: Trip) => Trip | null;
+};
+
+export const localTripStore: TripStore = {
+  getTrip: getTripById,
+  saveTrip: saveLocalTrip,
+};
+
 export function hasCoordinates(
   place: Pick<Place, "latitude" | "longitude">,
 ): place is Place & { latitude: number; longitude: number } {
@@ -206,8 +220,8 @@ export function hasCoordinates(
   );
 }
 
-export function addPlaceToTrip(
-  tripId: string,
+export function applyAddPlaceToTrip(
+  trip: Trip,
   input: {
     name: string;
     address: string;
@@ -218,12 +232,7 @@ export function addPlaceToTrip(
     latitude?: number;
     longitude?: number;
   },
-): Trip | null {
-  const trip = getTripById(tripId);
-  if (!trip) {
-    return null;
-  }
-
+): Trip {
   const kind = normalizePlaceKind(input.kind);
   const category =
     typeof input.category === "string" && input.category.trim()
@@ -246,16 +255,34 @@ export function addPlaceToTrip(
     ...(typeof input.longitude === "number" ? { longitude: input.longitude } : {}),
   };
 
-  return persistTrip(
-    normalizeTrip({
-      ...trip,
-      places: [...(trip.places ?? []), nextPlace],
-    }),
-  );
+  return normalizeTrip({
+    ...trip,
+    places: [...(trip.places ?? []), nextPlace],
+  });
 }
 
-export function updatePlaceInTrip(
+export function addPlaceToTrip(
   tripId: string,
+  input: {
+    name: string;
+    address: string;
+    date: string;
+    category?: string;
+    kind?: Place["kind"];
+    stayMinutes?: number;
+    latitude?: number;
+    longitude?: number;
+  },
+): Trip | null {
+  const trip = getTripById(tripId);
+  if (!trip) {
+    return null;
+  }
+  return persistTrip(applyAddPlaceToTrip(trip, input));
+}
+
+export function applyUpdatePlaceInTrip(
+  trip: Trip,
   placeId: string,
   input: {
     name: string;
@@ -266,11 +293,6 @@ export function updatePlaceInTrip(
     longitude?: number;
   },
 ): Trip | null {
-  const trip = getTripById(tripId);
-  if (!trip) {
-    return null;
-  }
-
   const name = input.name.trim();
   const address = input.address.trim();
   if (!name || !address) {
@@ -314,15 +336,34 @@ export function updatePlaceInTrip(
     return null;
   }
 
-  return persistTrip(normalizeTrip({ ...trip, places: nextPlaces }));
+  return normalizeTrip({ ...trip, places: nextPlaces });
 }
 
-export function updatePlaceCoordinates(
+export function updatePlaceInTrip(
   tripId: string,
-  updates: { id: string; latitude: number; longitude: number }[],
+  placeId: string,
+  input: {
+    name: string;
+    address: string;
+    category?: string;
+    kind?: Place["kind"];
+    latitude?: number;
+    longitude?: number;
+  },
 ): Trip | null {
   const trip = getTripById(tripId);
-  if (!trip || updates.length === 0) {
+  if (!trip) {
+    return null;
+  }
+  const next = applyUpdatePlaceInTrip(trip, placeId, input);
+  return next ? persistTrip(next) : null;
+}
+
+export function applyUpdatePlaceCoordinates(
+  trip: Trip,
+  updates: { id: string; latitude: number; longitude: number }[],
+): Trip {
+  if (updates.length === 0) {
     return trip;
   }
 
@@ -339,7 +380,18 @@ export function updatePlaceCoordinates(
     };
   });
 
-  return persistTrip(normalizeTrip({ ...trip, places: nextPlaces }));
+  return normalizeTrip({ ...trip, places: nextPlaces });
+}
+
+export function updatePlaceCoordinates(
+  tripId: string,
+  updates: { id: string; latitude: number; longitude: number }[],
+): Trip | null {
+  const trip = getTripById(tripId);
+  if (!trip || updates.length === 0) {
+    return trip;
+  }
+  return persistTrip(applyUpdatePlaceCoordinates(trip, updates));
 }
 
 export function updatePlacesCategory(
@@ -374,16 +426,11 @@ export function updatePlacesCategory(
   return persistTrip(normalizeTrip({ ...trip, places: nextPlaces }));
 }
 
-export function updatePlaceStayMinutes(
-  tripId: string,
+export function applyUpdatePlaceStayMinutes(
+  trip: Trip,
   placeId: string,
   stayMinutes: number,
-): Trip | null {
-  const trip = getTripById(tripId);
-  if (!trip) {
-    return null;
-  }
-
+): Trip {
   const nextPlaces = (trip.places ?? []).map((place) =>
     place.id === placeId
       ? {
@@ -396,20 +443,26 @@ export function updatePlaceStayMinutes(
         }
       : place,
   );
-
-  return persistTrip(normalizeTrip({ ...trip, places: nextPlaces }));
+  return normalizeTrip({ ...trip, places: nextPlaces });
 }
 
-export function updatePlaceTravelMinutes(
+export function updatePlaceStayMinutes(
   tripId: string,
   placeId: string,
-  travelMinutesToNext: number,
+  stayMinutes: number,
 ): Trip | null {
   const trip = getTripById(tripId);
   if (!trip) {
     return null;
   }
+  return persistTrip(applyUpdatePlaceStayMinutes(trip, placeId, stayMinutes));
+}
 
+export function applyUpdatePlaceTravelMinutes(
+  trip: Trip,
+  placeId: string,
+  travelMinutesToNext: number,
+): Trip {
   const nextTravel = getTravelMinutes({ travelMinutesToNext });
   const nextPlaces = (trip.places ?? []).map((place) =>
     place.id === placeId
@@ -421,11 +474,10 @@ export function updatePlaceTravelMinutes(
         }
       : place,
   );
-
-  return persistTrip(normalizeTrip({ ...trip, places: nextPlaces }));
+  return normalizeTrip({ ...trip, places: nextPlaces });
 }
 
-export function updatePlaceWalkTravel(
+export function updatePlaceTravelMinutes(
   tripId: string,
   placeId: string,
   travelMinutesToNext: number,
@@ -434,7 +486,14 @@ export function updatePlaceWalkTravel(
   if (!trip) {
     return null;
   }
+  return persistTrip(applyUpdatePlaceTravelMinutes(trip, placeId, travelMinutesToNext));
+}
 
+export function applyUpdatePlaceWalkTravel(
+  trip: Trip,
+  placeId: string,
+  travelMinutesToNext: number,
+): Trip {
   const nextTravel = getTravelMinutes({ travelMinutesToNext });
   const nextPlaces = (trip.places ?? []).map((place) =>
     place.id === placeId
@@ -448,21 +507,27 @@ export function updatePlaceWalkTravel(
         }
       : place,
   );
-
-  return persistTrip(normalizeTrip({ ...trip, places: nextPlaces }));
+  return normalizeTrip({ ...trip, places: nextPlaces });
 }
 
-export function updatePlaceDrivingTravel(
+export function updatePlaceWalkTravel(
   tripId: string,
   placeId: string,
   travelMinutesToNext: number,
-  distanceKm: number,
 ): Trip | null {
   const trip = getTripById(tripId);
   if (!trip) {
     return null;
   }
+  return persistTrip(applyUpdatePlaceWalkTravel(trip, placeId, travelMinutesToNext));
+}
 
+export function applyUpdatePlaceDrivingTravel(
+  trip: Trip,
+  placeId: string,
+  travelMinutesToNext: number,
+  distanceKm: number,
+): Trip {
   const nextTravel = getTravelMinutes({ travelMinutesToNext });
   const nextDistance =
     typeof distanceKm === "number" && Number.isFinite(distanceKm) && distanceKm >= 0
@@ -478,12 +543,26 @@ export function updatePlaceDrivingTravel(
         }
       : place,
   );
-
-  return persistTrip(normalizeTrip({ ...trip, places: nextPlaces }));
+  return normalizeTrip({ ...trip, places: nextPlaces });
 }
 
-export function updatePlaceTransitTravel(
+export function updatePlaceDrivingTravel(
   tripId: string,
+  placeId: string,
+  travelMinutesToNext: number,
+  distanceKm: number,
+): Trip | null {
+  const trip = getTripById(tripId);
+  if (!trip) {
+    return null;
+  }
+  return persistTrip(
+    applyUpdatePlaceDrivingTravel(trip, placeId, travelMinutesToNext, distanceKm),
+  );
+}
+
+export function applyUpdatePlaceTransitTravel(
+  trip: Trip,
   placeId: string,
   input: {
     travelMode: "bus" | "subway";
@@ -492,12 +571,7 @@ export function updatePlaceTransitTravel(
     transit?: Place["travelTransit"];
     steps?: Place["travelTransitSteps"];
   },
-): Trip | null {
-  const trip = getTripById(tripId);
-  if (!trip) {
-    return null;
-  }
-
+): Trip {
   const nextTravel = getTravelMinutes({
     travelMinutesToNext: input.travelMinutesToNext,
   });
@@ -521,8 +595,39 @@ export function updatePlaceTransitTravel(
         }
       : place,
   );
+  return normalizeTrip({ ...trip, places: nextPlaces });
+}
 
-  return persistTrip(normalizeTrip({ ...trip, places: nextPlaces }));
+export function updatePlaceTransitTravel(
+  tripId: string,
+  placeId: string,
+  input: {
+    travelMode: "bus" | "subway";
+    travelMinutesToNext: number;
+    distanceKm: number;
+    transit?: Place["travelTransit"];
+    steps?: Place["travelTransitSteps"];
+  },
+): Trip | null {
+  const trip = getTripById(tripId);
+  if (!trip) {
+    return null;
+  }
+  return persistTrip(applyUpdatePlaceTransitTravel(trip, placeId, input));
+}
+
+export function applyUpdateDayStartTime(
+  trip: Trip,
+  date: string,
+  startTime: string,
+): Trip {
+  return normalizeTrip({
+    ...trip,
+    dayStartTimes: {
+      ...(trip.dayStartTimes ?? {}),
+      [date]: normalizeClockTime(startTime),
+    },
+  });
 }
 
 export function updateDayStartTime(
@@ -534,16 +639,14 @@ export function updateDayStartTime(
   if (!trip) {
     return null;
   }
+  return persistTrip(applyUpdateDayStartTime(trip, date, startTime));
+}
 
-  return persistTrip(
-    normalizeTrip({
-      ...trip,
-      dayStartTimes: {
-        ...(trip.dayStartTimes ?? {}),
-        [date]: normalizeClockTime(startTime),
-      },
-    }),
-  );
+export function applyDeletePlaceFromTrip(trip: Trip, placeId: string): Trip {
+  return normalizeTrip({
+    ...trip,
+    places: (trip.places ?? []).filter((place) => place.id !== placeId),
+  });
 }
 
 export function deletePlaceFromTrip(tripId: string, placeId: string): Trip | null {
@@ -551,25 +654,14 @@ export function deletePlaceFromTrip(tripId: string, placeId: string): Trip | nul
   if (!trip) {
     return null;
   }
-
-  return persistTrip(
-    normalizeTrip({
-      ...trip,
-      places: (trip.places ?? []).filter((place) => place.id !== placeId),
-    }),
-  );
+  return persistTrip(applyDeletePlaceFromTrip(trip, placeId));
 }
 
-export function reorderDayPlaces(
-  tripId: string,
+export function applyReorderDayPlaces(
+  trip: Trip,
   date: string,
   orderedPlaceIds: string[],
-): Trip | null {
-  const trip = getTripById(tripId);
-  if (!trip) {
-    return null;
-  }
-
+): Trip {
   const places = trip.places ?? [];
   const dayPlaces = places.filter((place) => place.date === date);
   const byId = new Map(dayPlaces.map((place) => [place.id, place]));
@@ -591,7 +683,19 @@ export function reorderDayPlaces(
     return next;
   });
 
-  return persistTrip(normalizeTrip({ ...trip, places: nextPlaces }));
+  return normalizeTrip({ ...trip, places: nextPlaces });
+}
+
+export function reorderDayPlaces(
+  tripId: string,
+  date: string,
+  orderedPlaceIds: string[],
+): Trip | null {
+  const trip = getTripById(tripId);
+  if (!trip) {
+    return null;
+  }
+  return persistTrip(applyReorderDayPlaces(trip, date, orderedPlaceIds));
 }
 
 export function listTripDates(startDate: string, endDate: string) {
