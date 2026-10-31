@@ -188,9 +188,19 @@ const SPECIAL_PLACE_EMOJI: Record<Exclude<PlaceKind, "visit">, string> = {
   home: "🏢",
   lodging: "🛏️",
   airport: "✈️",
+  station: "🚉",
 };
 
 const AIRPORT_KEYWORDS = ["공항", "항공"];
+const STATION_KEYWORDS = [
+  "기차역",
+  "철도역",
+  "정차역",
+  "기차",
+  "열차",
+  "KTX",
+  "SRT",
+];
 const LODGING_KEYWORDS = [
   "숙박",
   "호텔",
@@ -210,6 +220,7 @@ export function normalizePlaceKind(value: unknown): PlaceKind | undefined {
     value === "home" ||
     value === "airport" ||
     value === "lodging" ||
+    value === "station" ||
     value === "visit"
   ) {
     return value;
@@ -233,6 +244,9 @@ export function placeKindFromCategory(category?: string | null): PlaceKind {
       if (AIRPORT_KEYWORDS.some((keyword) => tokenMatches(token, keyword))) {
         return "airport";
       }
+      if (STATION_KEYWORDS.some((keyword) => tokenMatches(token, keyword))) {
+        return "station";
+      }
       if (LODGING_KEYWORDS.some((keyword) => tokenMatches(token, keyword))) {
         return "lodging";
       }
@@ -253,7 +267,12 @@ export function isNoStayPlace(place: {
   category?: string | null;
 }): boolean {
   const kind = placeKindOf(place);
-  return kind === "airport" || kind === "lodging" || kind === "home";
+  return (
+    kind === "airport" ||
+    kind === "lodging" ||
+    kind === "home" ||
+    kind === "station"
+  );
 }
 
 export function looksLikeHomePlace(place: {

@@ -36,6 +36,7 @@ const PLACE_KIND_OPTIONS: { value: PlaceKind; label: string }[] = [
   { value: "home", label: "🏢 집" },
   { value: "lodging", label: "🛏️ 숙소" },
   { value: "airport", label: "✈️ 공항" },
+  { value: "station", label: "🚉 기차역" },
 ];
 
 type SelectedPlace = {

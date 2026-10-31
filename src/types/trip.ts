@@ -1,4 +1,4 @@
-export type PlaceKind = "visit" | "airport" | "lodging" | "home";
+export type PlaceKind = "visit" | "airport" | "lodging" | "home" | "station";
 
 export type Place = {
   id: string;
