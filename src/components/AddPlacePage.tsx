@@ -37,6 +37,8 @@ const PLACE_KIND_OPTIONS: { value: PlaceKind; label: string }[] = [
   { value: "lodging", label: "🛏️ 숙소" },
   { value: "airport", label: "✈️ 공항" },
   { value: "station", label: "🚉 기차역" },
+  { value: "parking", label: "🅿️ 주차장" },
+  { value: "rental", label: "🚙 렌터카 존" },
 ];
 
 type SelectedPlace = {

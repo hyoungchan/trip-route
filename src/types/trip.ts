@@ -1,4 +1,11 @@
-export type PlaceKind = "visit" | "airport" | "lodging" | "home" | "station";
+export type PlaceKind =
+  | "visit"
+  | "airport"
+  | "lodging"
+  | "home"
+  | "station"
+  | "parking"
+  | "rental";
 
 export type Place = {
   id: string;

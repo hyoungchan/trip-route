@@ -189,6 +189,8 @@ const SPECIAL_PLACE_EMOJI: Record<Exclude<PlaceKind, "visit">, string> = {
   lodging: "🛏️",
   airport: "✈️",
   station: "🚉",
+  parking: "🅿️",
+  rental: "🚙",
 };
 
 const AIRPORT_KEYWORDS = ["공항", "항공"];
@@ -212,6 +214,8 @@ const LODGING_KEYWORDS = [
   "여관",
 ];
 
+const PARKING_KEYWORDS = ["주차장"];
+const RENTAL_KEYWORDS = ["렌터카", "렌트카"];
 const HOME_NAMES = new Set(["집", "우리집", "자택", "home"]);
 const HOME_CATEGORY_KEYWORDS = ["주택"];
 
@@ -221,6 +225,8 @@ export function normalizePlaceKind(value: unknown): PlaceKind | undefined {
     value === "airport" ||
     value === "lodging" ||
     value === "station" ||
+    value === "parking" ||
+    value === "rental" ||
     value === "visit"
   ) {
     return value;
@@ -249,6 +255,12 @@ export function placeKindFromCategory(category?: string | null): PlaceKind {
       }
       if (LODGING_KEYWORDS.some((keyword) => tokenMatches(token, keyword))) {
         return "lodging";
+      }
+      if (PARKING_KEYWORDS.some((keyword) => tokenMatches(token, keyword))) {
+        return "parking";
+      }
+      if (RENTAL_KEYWORDS.some((keyword) => tokenMatches(token, keyword))) {
+        return "rental";
       }
     }
   }
