@@ -43,6 +43,12 @@ export type TravelTransitStep = {
   transit?: TravelTransitLeg;
 };
 
+export type OverviewItem = {
+  id: string;
+  date: string;
+  text: string;
+};
+
 export type Trip = {
   id: string;
   title: string;
@@ -52,4 +58,5 @@ export type Trip = {
   stopCount: number;
   places?: Place[];
   dayStartTimes?: Record<string, string>;
+  overview?: OverviewItem[];
 };

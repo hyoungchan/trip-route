@@ -1,4 +1,4 @@
-import type { Place, Trip } from "@/types/trip";
+import type { OverviewItem, Place, Trip } from "@/types/trip";
 import { normalizePlaceKind } from "@/lib/place-category";
 import { getStayMinutes, getTravelMinutes, normalizeClockTime } from "@/lib/timetable";
 import {
@@ -84,6 +84,7 @@ export function normalizePlace(place: Place): Place {
 export function normalizeTrip(trip: Trip): Trip {
   const places = Array.isArray(trip.places) ? trip.places.map(normalizePlace) : [];
   const dayStartTimes = normalizeDayStartTimes(trip.dayStartTimes);
+  const overview = normalizeOverview(trip.overview);
   return {
     ...trip,
     startDate: normalizeIsoDate(trip.startDate),
@@ -91,7 +92,42 @@ export function normalizeTrip(trip: Trip): Trip {
     places,
     stopCount: places.length,
     ...(Object.keys(dayStartTimes).length > 0 ? { dayStartTimes } : {}),
+    ...(overview.length > 0 ? { overview } : { overview: undefined }),
   };
+}
+
+const MAX_OVERVIEW_TEXT_LENGTH = 500;
+
+export function normalizeOverviewItem(item: OverviewItem): OverviewItem | null {
+  const id = typeof item.id === "string" ? item.id.trim() : "";
+  const date =
+    typeof item.date === "string" ? normalizeIsoDate(item.date) : "";
+  const text = typeof item.text === "string" ? item.text.trim() : "";
+  if (!id || !date || !text) {
+    return null;
+  }
+  return {
+    id,
+    date,
+    text: text.slice(0, MAX_OVERVIEW_TEXT_LENGTH),
+  };
+}
+
+export function normalizeOverview(value: Trip["overview"]): OverviewItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const next: OverviewItem[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const normalized = normalizeOverviewItem(item);
+    if (normalized) {
+      next.push(normalized);
+    }
+  }
+  return next;
 }
 
 function normalizeDayStartTimes(
@@ -725,6 +761,87 @@ export function reorderDayPlaces(
     return null;
   }
   return persistTrip(applyReorderDayPlaces(trip, date, orderedPlaceIds));
+}
+
+export function applyAddOverviewItem(
+  trip: Trip,
+  date: string,
+  text: string,
+): Trip {
+  const trimmed = text.trim().slice(0, MAX_OVERVIEW_TEXT_LENGTH);
+  if (!trimmed) {
+    return trip;
+  }
+  const item: OverviewItem = {
+    id: crypto.randomUUID(),
+    date: normalizeIsoDate(date),
+    text: trimmed,
+  };
+  return normalizeTrip({
+    ...trip,
+    overview: [...(trip.overview ?? []), item],
+  });
+}
+
+export function applyUpdateOverviewItem(
+  trip: Trip,
+  itemId: string,
+  text: string,
+): Trip {
+  const trimmed = text.trim().slice(0, MAX_OVERVIEW_TEXT_LENGTH);
+  if (!trimmed) {
+    return applyDeleteOverviewItem(trip, itemId);
+  }
+  let updated = false;
+  const overview = (trip.overview ?? []).map((item) => {
+    if (item.id !== itemId) {
+      return item;
+    }
+    updated = true;
+    return { ...item, text: trimmed };
+  });
+  if (!updated) {
+    return trip;
+  }
+  return normalizeTrip({ ...trip, overview });
+}
+
+export function applyDeleteOverviewItem(trip: Trip, itemId: string): Trip {
+  const overview = (trip.overview ?? []).filter((item) => item.id !== itemId);
+  if (overview.length === (trip.overview ?? []).length) {
+    return trip;
+  }
+  return normalizeTrip({ ...trip, overview });
+}
+
+export function applyReorderOverviewItems(
+  trip: Trip,
+  date: string,
+  orderedItemIds: string[],
+): Trip {
+  const overview = trip.overview ?? [];
+  const dayDate = normalizeIsoDate(date);
+  const dayItems = overview.filter((item) => item.date === dayDate);
+  const byId = new Map(dayItems.map((item) => [item.id, item]));
+  const reorderedDay = orderedItemIds
+    .map((id) => byId.get(id))
+    .filter((item): item is OverviewItem => Boolean(item));
+
+  if (reorderedDay.length !== dayItems.length) {
+    return trip;
+  }
+
+  let dayIndex = 0;
+  const nextOverview = overview.map((item) => {
+    if (item.date !== dayDate) {
+      return item;
+    }
+    const next = reorderedDay[dayIndex];
+    dayIndex += 1;
+    return next;
+  });
+
+  return normalizeTrip({ ...trip, overview: nextOverview });
 }
 
 export function listTripDates(startDate: string, endDate: string) {

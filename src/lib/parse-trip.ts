@@ -1,5 +1,5 @@
 import { normalizeTrip } from "@/lib/trips";
-import type { Place, Trip } from "@/types/trip";
+import type { OverviewItem, Place, Trip } from "@/types/trip";
 
 export function parseTrip(value: unknown): Trip | null {
   let input = value;
@@ -48,6 +48,20 @@ export function parseTrip(value: unknown): Trip | null {
       ? (raw.dayStartTimes as Trip["dayStartTimes"])
       : undefined;
 
+  const overview = Array.isArray(raw.overview)
+    ? raw.overview.filter((item): item is OverviewItem => {
+        if (!item || typeof item !== "object") {
+          return false;
+        }
+        const entry = item as Record<string, unknown>;
+        return (
+          typeof entry.id === "string" &&
+          typeof entry.date === "string" &&
+          typeof entry.text === "string"
+        );
+      })
+    : undefined;
+
   return normalizeTrip({
     id: raw.id.trim(),
     title: raw.title,
@@ -57,5 +71,6 @@ export function parseTrip(value: unknown): Trip | null {
     stopCount: places.length,
     places,
     ...(dayStartTimes ? { dayStartTimes } : {}),
+    ...(overview ? { overview } : {}),
   });
 }

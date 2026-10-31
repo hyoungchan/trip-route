@@ -343,6 +343,12 @@ export function TripDetailPage({ tripId, mode = "local" }: TripDetailPageProps) 
             onRefresh={isShared ? () => void handleRefresh() : undefined}
             refreshing={refreshing}
           />
+          <Link
+            href={isShared ? `/trip/${tripId}/overview` : `/trips/${tripId}/overview`}
+            className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-full border border-teal-200 bg-teal-50 px-4 text-sm font-semibold text-teal-800 sm:w-auto"
+          >
+            여행 개요
+          </Link>
         </section>
 
         <div className="mt-6 grid grid-cols-1 gap-5 lg:mt-8 lg:grid-cols-[minmax(20rem,1.1fr)_minmax(22rem,0.9fr)]">
